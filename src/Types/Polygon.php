@@ -5,6 +5,7 @@ namespace Fleetbase\LaravelMysqlSpatial\Types;
 use Fleetbase\LaravelMysqlSpatial\Exceptions\InvalidGeoJsonException;
 use GeoJson\GeoJson;
 use GeoJson\Geometry\Polygon as GeoJsonPolygon;
+use GeoJson\Geometry\LinearRing as GeoJsonLinearRing;
 
 class Polygon extends MultiLineString
 {
@@ -37,6 +38,7 @@ class Polygon extends MultiLineString
 
     /**
      * Convert to GeoJson Polygon that is jsonable to GeoJSON.
+     * Includes a fix for "LinearRing requires at least four positions".
      *
      * @return GeoJsonPolygon
      */
@@ -44,8 +46,28 @@ class Polygon extends MultiLineString
     public function jsonSerialize()
     {
         $linearRings = [];
+        
         foreach ($this->items as $lineString) {
-            $linearRings[] = new \GeoJson\Geometry\LinearRing($lineString->jsonSerialize()->getCoordinates());
+            // Get coordinates from the internal LineString
+            $coordinates = $lineString->jsonSerialize()->getCoordinates();
+
+            if (count($coordinates) > 0) {
+                // 1. Ensure it is closed (First point must equal Last point)
+                $first = $coordinates[0];
+                $last = $coordinates[count($coordinates) - 1];
+
+                if ($first !== $last) {
+                    $coordinates[] = $first;
+                }
+
+                // 2. Ensure at least 4 positions (GeoJSON spec requirement for LinearRing)
+                // If it's a triangle but only has 3 points, we repeat the first point until it has 4.
+                while (count($coordinates) < 4) {
+                    $coordinates[] = $coordinates[0];
+                }
+
+                $linearRings[] = new GeoJsonLinearRing($coordinates);
+            }
         }
 
         return new GeoJsonPolygon($linearRings);
